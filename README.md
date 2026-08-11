@@ -5,7 +5,7 @@ AstrBot 侧联动插件。它向 AI Agent 注册四个工具，通过带 Bearer 
 - 作者：[l52312516-cell](https://github.com/l52312516-cell)
 - 仓库：[l52312516-cell/astrbot_plugin_yunzai_bridge](https://github.com/l52312516-cell/astrbot_plugin_yunzai_bridge)
 - 配套 Yunzai 插件：[l52312516-cell/yunzai_plugin_astrbot_bridge](https://github.com/l52312516-cell/yunzai_plugin_astrbot_bridge)
-- 当前版本：`1.3.4`
+- 当前版本：`1.3.5`
 
 ## 功能
 
@@ -156,6 +156,14 @@ RPC 目标由插件内部从当前消息事件生成：
 }
 ```
 
+会话目标解析优先级：
+
+1. `event.unified_msg_origin` 中的 `GroupMessage/FriendMessage` 与 session ID。
+2. `event.message_obj` 中的群、会话和发送者字段。
+3. `get_group_id()` 与 `get_sender_id()` 兼容回退。
+
+私聊 origin 会强制清空可能残留的群号，群聊 origin 会覆盖包装事件中不准确的 getter。Yunzai 响应中的 `effective_target` 会回显最终实际使用的 Bot、消息类型、群和用户。
+
 Yunzai 端忽略 RPC 中的 Bot ID，并使用自己的 `default_bot_id` 或默认账号。Yunzai 每次执行前重新读取主人配置，不信任 Agent 声明的角色。
 
 | 角色 | 行为 |
@@ -273,11 +281,11 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 
 ### Tool Result 出现 `�PNG`、`IHDR` 或大量乱码
 
-旧版 Yunzai 桥接把图片 `Buffer` 转成了字符串。将 AstrBot 和 Yunzai 两端都升级到 `1.3.4`；默认由 Yunzai 原生发送，AstrBot 转发模式才使用临时媒体。
+旧版 Yunzai 桥接把图片 `Buffer` 转成了字符串。将 AstrBot 和 Yunzai 两端都升级到 `1.3.5`；默认由 Yunzai 原生发送，AstrBot 转发模式才使用临时媒体。
 
 ### 图片 URL 正常但会话没有收到图片
 
-- 确认两端都是 `1.3.4`。
+- 确认两端都是 `1.3.5`。
 - 追求初版速度时，AstrBot 选择 `Yunzai 原生发送`，Yunzai 锅巴开启原生发送。
 - 查看图片消息的 `native_delivery`、`native_delivery_error` 和 `delivered_to_astrbot`。
 - 查看 Tool Result 中的 `delivered_to_astrbot` 和 `delivery_error`。
@@ -285,7 +293,7 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 
 ### 机器人说已发送，但实际没有收到
 
-旧版把命令执行成功误当成消息发送成功。`1.3.4` 中应检查：
+旧版把命令执行成功误当成消息发送成功。`1.3.5` 中应检查：
 
 ```json
 {
@@ -300,6 +308,23 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 ```
 
 只有 `reply_delivery.status: "sent"` 才能确认 Yunzai 原生发送成功。图片经过原生或后备路径后还会生成最终结论 `image_delivery.status`；只有它等于 `sent` 时 Agent 才能声称图片已经发出。`failed` 或 `partial` 会给出错误，`no_reply` 表示插件没有调用回复函数。
+
+### 图片发到了错误会话
+
+检查 Tool Result：
+
+```json
+{
+  "effective_target": {
+    "bot_id": "Yunzai账号",
+    "message_type": "group",
+    "group_id": "当前群号",
+    "user_id": "当前用户"
+  }
+}
+```
+
+群聊中的 `message_type` 或 `group_id` 不正确，说明会话适配字段异常；`1.3.5` 已改为优先使用 `unified_msg_origin`。如果 `effective_target` 正确但仍投递到别处，需要检查 Yunzai `default_bot_id` 对应的适配器和 Bot 账号。
 
 ## 开发测试
 

@@ -69,7 +69,7 @@ def _sync_download_media(url: str, token: str, timeout: float) -> tuple[bytes, s
         headers={
             "Accept": "image/*",
             "Authorization": f"Bearer {token}",
-            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.4",
+            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.5",
         },
         method="GET",
     )
@@ -87,7 +87,7 @@ def _sync_download_media(url: str, token: str, timeout: float) -> tuple[bytes, s
     PLUGIN_ID,
     "l52312516-cell",
     "让 AstrBot Agent 通过 HTTP 调用远程 Yunzai 命令和游戏查询模板",
-    "1.3.4",
+    "1.3.5",
 )
 class AstrBotYunzaiBridge(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
@@ -139,12 +139,51 @@ class AstrBotYunzaiBridge(Star):
         target = {"group_id": "", "user_id": ""}
         if event is None:
             return target
+
+        origin = getattr(event, "unified_msg_origin", "")
+        if callable(origin):
+            try:
+                origin = origin()
+            except Exception:
+                origin = ""
+        origin_type = ""
+        origin_session = ""
+        origin_parts = str(origin or "").rsplit(":", 2)
+        if len(origin_parts) == 3:
+            origin_type = origin_parts[1].strip().lower()
+            origin_session = origin_parts[2].strip()
+
+        message_obj = getattr(event, "message_obj", None)
+        sender = getattr(message_obj, "sender", None)
+        for value in (
+            getattr(sender, "user_id", None),
+            getattr(sender, "id", None),
+            getattr(message_obj, "user_id", None),
+        ):
+            if value not in (None, ""):
+                target["user_id"] = str(value).strip()
+                break
+
+        for value in (
+            getattr(message_obj, "group_id", None),
+            getattr(message_obj, "session_id", None) if "group" in type(message_obj).__name__.lower() else None,
+        ):
+            if value not in (None, ""):
+                target["group_id"] = str(value).strip()
+                break
+
         group_getter = getattr(event, "get_group_id", None)
         user_getter = getattr(event, "get_sender_id", None)
-        if callable(group_getter):
+        if callable(group_getter) and not target["group_id"]:
             target["group_id"] = str(group_getter() or "").strip()
-        if callable(user_getter):
+        if callable(user_getter) and not target["user_id"]:
             target["user_id"] = str(user_getter() or "").strip()
+
+        if "group" in origin_type and origin_session:
+            target["group_id"] = origin_session
+        elif ("friend" in origin_type or "private" in origin_type) and origin_session:
+            target["group_id"] = ""
+            target["user_id"] = origin_session
         return target
 
     async def _request(
@@ -165,7 +204,7 @@ class AstrBotYunzaiBridge(Star):
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {token}",
-            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.4",
+            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.5",
         }
         body = None
         if payload is not None:
