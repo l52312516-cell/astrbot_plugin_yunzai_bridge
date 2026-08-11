@@ -69,7 +69,7 @@ def _sync_download_media(url: str, token: str, timeout: float) -> tuple[bytes, s
         headers={
             "Accept": "image/*",
             "Authorization": f"Bearer {token}",
-            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.5",
+            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.6",
         },
         method="GET",
     )
@@ -87,7 +87,7 @@ def _sync_download_media(url: str, token: str, timeout: float) -> tuple[bytes, s
     PLUGIN_ID,
     "l52312516-cell",
     "让 AstrBot Agent 通过 HTTP 调用远程 Yunzai 命令和游戏查询模板",
-    "1.3.5",
+    "1.3.6",
 )
 class AstrBotYunzaiBridge(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
@@ -115,14 +115,8 @@ class AstrBotYunzaiBridge(Star):
         mode = str(self._cfg("reply_delivery_mode", "") or "").strip().lower()
         if mode in {"yunzai_native", "astrbot_forward", "capture_only"}:
             return mode
-        legacy_native = self._cfg("allow_send_reply", None)
-        legacy_forward = self._cfg("deliver_captured_images", None)
-        if legacy_native is True:
-            return "yunzai_native"
-        if legacy_forward is True:
-            return "astrbot_forward"
-        if legacy_native is False or legacy_forward is False:
-            return "capture_only"
+        # Old boolean settings are intentionally ignored. They could disagree
+        # and silently force upgraded installations into capture-only mode.
         return "yunzai_native"
 
     def _error(self, error: str, duration_ms: int = 0, **extra: Any) -> dict[str, Any]:
@@ -204,7 +198,7 @@ class AstrBotYunzaiBridge(Star):
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {token}",
-            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.5",
+            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.6",
         }
         body = None
         if payload is not None:
@@ -391,6 +385,7 @@ class AstrBotYunzaiBridge(Star):
         self,
         event: AstrMessageEvent,
         command: str,
+        **legacy_kwargs: Any,
     ) -> str:
         """以当前真实会话用户身份执行远程 Yunzai 命令。
 
@@ -416,6 +411,8 @@ class AstrBotYunzaiBridge(Star):
         result = await self._request("POST", "/astrbot-bridge/v1/rpc", payload)
         await self._deliver_captured_images(event, result, delivery_mode)
         self._summarize_image_delivery(result)
+        if legacy_kwargs:
+            result["ignored_legacy_tool_args"] = sorted(legacy_kwargs)
         return _json_text(result)
 
     @_tool_decorator("yunzai_game_query")
@@ -427,6 +424,7 @@ class AstrBotYunzaiBridge(Star):
         keyword: str = "",
         uid: str = "",
         args: str = "",
+        **legacy_kwargs: Any,
     ) -> str:
         """通过远程 Yunzai 游戏查询模板执行任意已注册游戏的结构化查询。
 
@@ -469,4 +467,6 @@ class AstrBotYunzaiBridge(Star):
         result = await self._request("POST", "/astrbot-bridge/v1/rpc", payload)
         await self._deliver_captured_images(event, result, delivery_mode)
         self._summarize_image_delivery(result)
+        if legacy_kwargs:
+            result["ignored_legacy_tool_args"] = sorted(legacy_kwargs)
         return _json_text(result)

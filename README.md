@@ -5,7 +5,7 @@ AstrBot 侧联动插件。它向 AI Agent 注册四个工具，通过带 Bearer 
 - 作者：[l52312516-cell](https://github.com/l52312516-cell)
 - 仓库：[l52312516-cell/astrbot_plugin_yunzai_bridge](https://github.com/l52312516-cell/astrbot_plugin_yunzai_bridge)
 - 配套 Yunzai 插件：[l52312516-cell/yunzai_plugin_astrbot_bridge](https://github.com/l52312516-cell/yunzai_plugin_astrbot_bridge)
-- 当前版本：`1.3.5`
+- 当前版本：`1.3.6`
 
 ## 功能
 
@@ -128,7 +128,6 @@ yunzai_execute(command="#面板100000001")
 | `keyword` | 角色、武器、图鉴或攻略关键词 |
 | `uid` | 可选游戏 UID |
 | `args` | 模板需要的其他文本参数 |
-| `send_reply` | 是否发送到真实会话，默认 `false` |
 
 示例：
 
@@ -235,9 +234,11 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 | `astrbot_forward` | Yunzai 只捕获，AstrBot 下载临时图片并发送到当前会话 |
 | `capture_only` | 只把回复交给 Agent，不实际发送图片 |
 
-原生模式要求 Yunzai 锅巴中的“Yunzai 原生发送回复”开启。原生发送明确返回失败时，失败图片自动回退到 AstrBot；已成功发送的图片不会重复转发。
+原生模式不再需要 Yunzai 端的第二个发送开关。AstrBot 会在 RPC 中传入发送策略，Yunzai 直接调用当前事件的原生回复函数。原生发送明确返回失败时，失败图片自动回退到 AstrBot；已成功发送的图片不会重复转发。
 
-旧版两个布尔配置会兼容迁移，不再同时显示在界面中。
+旧版 `allow_send_reply` 与 `deliver_captured_images` 布尔配置会被忽略，避免历史值冲突后静默进入仅捕获模式。升级后只读取 `reply_delivery_mode`；该字段缺失时默认 `yunzai_native`。
+
+`1.3.6` 兼容 AstrBot 热更新后残留的旧 Tool Schema。即使旧 Schema 仍传入 `send_reply`、`user_id`、`group_id` 或 `bot_id`，工具也只会记录并忽略这些参数；发送模式仍只服从 `reply_delivery_mode`，身份仍只取当前真实会话。
 
 注意：禁止发送回复不等于禁止命令副作用。主人执行配置修改、更新或重启命令时，即使 `send_reply=false`，命令本身仍可能生效。
 
@@ -250,6 +251,12 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 - 不要把 `1145` 直接暴露到公网。
 
 ## 故障排查
+
+### `got an unexpected keyword argument 'send_reply'`
+
+这是 AstrBot 热更新后仍使用旧 Tool Schema 导致的。升级 AstrBot 端插件到 `1.3.6`，然后在插件管理中停用并重新启用插件；如果日志仍出现旧签名，完整重启 AstrBot 以清理工具缓存。
+
+`1.3.6` 会兼容接收并忽略旧 `send_reply` 参数，因此旧缓存不会再让工具执行抛出 `TypeError`。不要把 `send_reply` 加回 Agent 参数；真实发送方式由插件配置中的单一 `reply_delivery_mode` 决定。
 
 ### `未配置 Yunzai 地址`
 
@@ -281,19 +288,19 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 
 ### Tool Result 出现 `�PNG`、`IHDR` 或大量乱码
 
-旧版 Yunzai 桥接把图片 `Buffer` 转成了字符串。将 AstrBot 和 Yunzai 两端都升级到 `1.3.5`；默认由 Yunzai 原生发送，AstrBot 转发模式才使用临时媒体。
+旧版 Yunzai 桥接把图片 `Buffer` 转成了字符串。将 AstrBot 和 Yunzai 两端都升级到 `1.3.6`；默认由 Yunzai 原生发送，AstrBot 转发模式才使用临时媒体。
 
 ### 图片 URL 正常但会话没有收到图片
 
-- 确认两端都是 `1.3.5`。
-- 追求初版速度时，AstrBot 选择 `Yunzai 原生发送`，Yunzai 锅巴开启原生发送。
+- 确认两端都是 `1.3.6`。
+- 追求初版速度时，AstrBot 选择 `Yunzai 原生发送`；Yunzai 端不再有第二个发送开关。
 - 查看图片消息的 `native_delivery`、`native_delivery_error` 和 `delivered_to_astrbot`。
 - 查看 Tool Result 中的 `delivered_to_astrbot` 和 `delivery_error`。
 - 确认 AstrBot 到 Yunzai 的媒体 URL 仍可访问，图片需要在 5 分钟内下载。
 
 ### 机器人说已发送，但实际没有收到
 
-旧版把命令执行成功误当成消息发送成功。`1.3.5` 中应检查：
+旧版把命令执行成功误当成消息发送成功。`1.3.6` 中应检查：
 
 ```json
 {
@@ -324,7 +331,7 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 }
 ```
 
-群聊中的 `message_type` 或 `group_id` 不正确，说明会话适配字段异常；`1.3.5` 已改为优先使用 `unified_msg_origin`。如果 `effective_target` 正确但仍投递到别处，需要检查 Yunzai `default_bot_id` 对应的适配器和 Bot 账号。
+群聊中的 `message_type` 或 `group_id` 不正确，说明会话适配字段异常；`1.3.6` 优先使用 `unified_msg_origin`。如果 `effective_target` 正确但仍投递到别处，需要检查 Yunzai `default_bot_id` 对应的适配器和 Bot 账号。
 
 ## 开发测试
 
