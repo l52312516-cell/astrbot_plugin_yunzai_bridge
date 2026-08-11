@@ -5,7 +5,7 @@ AstrBot 侧联动插件。它向 AI Agent 注册四个工具，通过带 Bearer 
 - 作者：[l52312516-cell](https://github.com/l52312516-cell)
 - 仓库：[l52312516-cell/astrbot_plugin_yunzai_bridge](https://github.com/l52312516-cell/astrbot_plugin_yunzai_bridge)
 - 配套 Yunzai 插件：[l52312516-cell/yunzai_plugin_astrbot_bridge](https://github.com/l52312516-cell/yunzai_plugin_astrbot_bridge)
-- 当前版本：`1.3.6`
+- 当前版本：`1.3.7`
 
 ## 功能
 
@@ -62,7 +62,9 @@ git clone https://github.com/l52312516-cell/astrbot_plugin_yunzai_bridge.git
 | `yunzai_url` | 空 | Yunzai 桥接地址，例如 `http://127.0.0.1:1145` |
 | `token` | 空 | 与 Yunzai 端完全一致的共享 Token |
 | `request_timeout` | `30` | HTTP 请求超时秒数，范围 `1-120` |
-| `reply_delivery_mode` | `yunzai_native` | 互斥发送模式：Yunzai 原生、AstrBot 转发或仅捕获 |
+| `reply_delivery_mode` | `yunzai_native` | 互斥发送模式；原生模式要求 Yunzai 配置默认 Bot ID 并重启 |
+
+选择 `yunzai_native` 前，必须在 Yunzai 桥接配置中把 `default_bot_id` 填为 Yunzai 实际登录的机器人 QQ 号，然后完整重启 Yunzai。这里填写的不是 AstrBot Bot ID。选择 `astrbot_forward` 或 `capture_only` 时，不要求填写 Yunzai `default_bot_id`。
 
 地址示例：
 
@@ -163,7 +165,7 @@ RPC 目标由插件内部从当前消息事件生成：
 
 私聊 origin 会强制清空可能残留的群号，群聊 origin 会覆盖包装事件中不准确的 getter。Yunzai 响应中的 `effective_target` 会回显最终实际使用的 Bot、消息类型、群和用户。
 
-Yunzai 端忽略 RPC 中的 Bot ID，并使用自己的 `default_bot_id` 或默认账号。Yunzai 每次执行前重新读取主人配置，不信任 Agent 声明的角色。
+Yunzai 端忽略 RPC 中的 Bot ID，并使用自己的 `default_bot_id`；空值只会回退当前默认账号完成事件处理，不能保证原生回复路由正确。Yunzai 每次执行前重新读取主人配置，不信任 Agent 声明的角色。
 
 | 角色 | 行为 |
 | --- | --- |
@@ -230,15 +232,15 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 
 | 模式 | 行为 |
 | --- | --- |
-| `yunzai_native` | 默认推荐，沿用初版 `nativeReply`，生成回复时立即由 Yunzai Bot 发送 |
-| `astrbot_forward` | Yunzai 只捕获，AstrBot 下载临时图片并发送到当前会话 |
+| `yunzai_native` | 最快；要求 Yunzai 填写实际机器人 QQ 作为 `default_bot_id` 并完整重启 |
+| `astrbot_forward` | 无需 Yunzai `default_bot_id`；AstrBot 下载临时图片并发送到当前会话 |
 | `capture_only` | 只把回复交给 Agent，不实际发送图片 |
 
-原生模式不再需要 Yunzai 端的第二个发送开关。AstrBot 会在 RPC 中传入发送策略，Yunzai 直接调用当前事件的原生回复函数。原生发送明确返回失败时，失败图片自动回退到 AstrBot；已成功发送的图片不会重复转发。
+原生模式不再需要 Yunzai 端的第二个发送开关，但必须指定实际发送账号。AstrBot 会在 RPC 中传入发送策略，Yunzai 使用 `default_bot_id` 对应账号调用当前事件的原生回复函数。原生发送明确返回失败时，失败图片自动回退到 AstrBot；已成功发送的图片不会重复转发。
 
 旧版 `allow_send_reply` 与 `deliver_captured_images` 布尔配置会被忽略，避免历史值冲突后静默进入仅捕获模式。升级后只读取 `reply_delivery_mode`；该字段缺失时默认 `yunzai_native`。
 
-`1.3.6` 兼容 AstrBot 热更新后残留的旧 Tool Schema。即使旧 Schema 仍传入 `send_reply`、`user_id`、`group_id` 或 `bot_id`，工具也只会记录并忽略这些参数；发送模式仍只服从 `reply_delivery_mode`，身份仍只取当前真实会话。
+`1.3.7` 兼容 AstrBot 热更新后残留的旧 Tool Schema。即使旧 Schema 仍传入 `send_reply`、`user_id`、`group_id` 或 `bot_id`，工具也只会记录并忽略这些参数；发送模式仍只服从 `reply_delivery_mode`，身份仍只取当前真实会话。
 
 注意：禁止发送回复不等于禁止命令副作用。主人执行配置修改、更新或重启命令时，即使 `send_reply=false`，命令本身仍可能生效。
 
@@ -254,9 +256,9 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 
 ### `got an unexpected keyword argument 'send_reply'`
 
-这是 AstrBot 热更新后仍使用旧 Tool Schema 导致的。升级 AstrBot 端插件到 `1.3.6`，然后在插件管理中停用并重新启用插件；如果日志仍出现旧签名，完整重启 AstrBot 以清理工具缓存。
+这是 AstrBot 热更新后仍使用旧 Tool Schema 导致的。升级 AstrBot 端插件到 `1.3.7`，然后在插件管理中停用并重新启用插件；如果日志仍出现旧签名，完整重启 AstrBot 以清理工具缓存。
 
-`1.3.6` 会兼容接收并忽略旧 `send_reply` 参数，因此旧缓存不会再让工具执行抛出 `TypeError`。不要把 `send_reply` 加回 Agent 参数；真实发送方式由插件配置中的单一 `reply_delivery_mode` 决定。
+`1.3.7` 会兼容接收并忽略旧 `send_reply` 参数，因此旧缓存不会再让工具执行抛出 `TypeError`。不要把 `send_reply` 加回 Agent 参数；真实发送方式由插件配置中的单一 `reply_delivery_mode` 决定。
 
 ### `未配置 Yunzai 地址`
 
@@ -288,11 +290,11 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 
 ### Tool Result 出现 `�PNG`、`IHDR` 或大量乱码
 
-旧版 Yunzai 桥接把图片 `Buffer` 转成了字符串。将 AstrBot 和 Yunzai 两端都升级到 `1.3.6`；默认由 Yunzai 原生发送，AstrBot 转发模式才使用临时媒体。
+旧版 Yunzai 桥接把图片 `Buffer` 转成了字符串。将 AstrBot 和 Yunzai 两端都升级到 `1.3.7`；默认由 Yunzai 原生发送，AstrBot 转发模式才使用临时媒体。
 
 ### 图片 URL 正常但会话没有收到图片
 
-- 确认两端都是 `1.3.6`。
+- 确认两端都是 `1.3.7`。
 - 追求初版速度时，AstrBot 选择 `Yunzai 原生发送`；Yunzai 端不再有第二个发送开关。
 - 查看图片消息的 `native_delivery`、`native_delivery_error` 和 `delivered_to_astrbot`。
 - 查看 Tool Result 中的 `delivered_to_astrbot` 和 `delivery_error`。
@@ -300,7 +302,7 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 
 ### 机器人说已发送，但实际没有收到
 
-旧版把命令执行成功误当成消息发送成功。`1.3.6` 中应检查：
+旧版把命令执行成功误当成消息发送成功。`1.3.7` 中应检查：
 
 ```json
 {
@@ -331,7 +333,7 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 }
 ```
 
-群聊中的 `message_type` 或 `group_id` 不正确，说明会话适配字段异常；`1.3.6` 优先使用 `unified_msg_origin`。如果 `effective_target` 正确但仍投递到别处，需要检查 Yunzai `default_bot_id` 对应的适配器和 Bot 账号。
+群聊中的 `message_type` 或 `group_id` 不正确，说明会话适配字段异常；`1.3.7` 优先使用 `unified_msg_origin`。如果 `effective_target` 正确但仍投递到别处，需要检查 Yunzai `default_bot_id` 对应的适配器和 Bot 账号。
 
 ## 开发测试
 

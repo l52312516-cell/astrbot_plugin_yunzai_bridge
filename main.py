@@ -69,7 +69,7 @@ def _sync_download_media(url: str, token: str, timeout: float) -> tuple[bytes, s
         headers={
             "Accept": "image/*",
             "Authorization": f"Bearer {token}",
-            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.6",
+            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.7",
         },
         method="GET",
     )
@@ -87,7 +87,7 @@ def _sync_download_media(url: str, token: str, timeout: float) -> tuple[bytes, s
     PLUGIN_ID,
     "l52312516-cell",
     "让 AstrBot Agent 通过 HTTP 调用远程 Yunzai 命令和游戏查询模板",
-    "1.3.6",
+    "1.3.7",
 )
 class AstrBotYunzaiBridge(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
@@ -198,7 +198,7 @@ class AstrBotYunzaiBridge(Star):
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {token}",
-            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.6",
+            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.7",
         }
         body = None
         if payload is not None:

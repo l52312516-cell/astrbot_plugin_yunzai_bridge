@@ -27,11 +27,11 @@
       "capture_only"
     ],
     "labels": [
-      "Yunzai 原生发送（推荐，最快）",
-      "AstrBot 转发捕获图片",
+      "Yunzai 原生发送（需配置 Yunzai Bot ID 并重启）",
+      "AstrBot 转发捕获图片（无需 Yunzai Bot ID）",
       "仅捕获，不实际发送"
     ],
     "default": "yunzai_native",
-    "hint": "三种模式互斥。原生发送失败的图片会自动回退到 AstrBot 转发，不会重复发送成功图片。"
+    "hint": "三种模式互斥。选择 Yunzai 原生发送时，必须在 Yunzai 桥接配置中填写实际登录的机器人 QQ 号作为默认 Bot ID，并完整重启 Yunzai；AstrBot 转发和仅捕获模式不要求填写。"
   }
 }

@@ -4,7 +4,7 @@ short_description: 让 AstrBot Agent 调用远程 Yunzai 命令和游戏查询�
 description: |
   通过带 Token 鉴权的 HTTP JSON RPC 连接远程 Yunzai。
   Agent 可以检查连接、查询分级权限和插件能力，以当前会话身份执行 Yunzai 命令，并调用任意已注册的游戏查询模板。
-version: 1.3.6
+version: 1.3.7
 author: l52312516-cell
 repo: "https://github.com/l52312516-cell/astrbot_plugin_yunzai_bridge"
 astrbot_version: ">=4.0,<5"
