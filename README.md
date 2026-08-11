@@ -5,7 +5,7 @@ AstrBot 侧联动插件。它向 AI Agent 注册四个工具，通过带 Bearer 
 - 作者：[l52312516-cell](https://github.com/l52312516-cell)
 - 仓库：[l52312516-cell/astrbot_plugin_yunzai_bridge](https://github.com/l52312516-cell/astrbot_plugin_yunzai_bridge)
 - 配套 Yunzai 插件：[l52312516-cell/yunzai_plugin_astrbot_bridge](https://github.com/l52312516-cell/yunzai_plugin_astrbot_bridge)
-- 当前版本：`1.3.3`
+- 当前版本：`1.3.4`
 
 ## 功能
 
@@ -62,8 +62,7 @@ git clone https://github.com/l52312516-cell/astrbot_plugin_yunzai_bridge.git
 | `yunzai_url` | 空 | Yunzai 桥接地址，例如 `http://127.0.0.1:1145` |
 | `token` | 空 | 与 Yunzai 端完全一致的共享 Token |
 | `request_timeout` | `30` | HTTP 请求超时秒数，范围 `1-120` |
-| `allow_send_reply` | `true` | 是否允许默认的 Yunzai `nativeReply` 原生发送 |
-| `deliver_captured_images` | `true` | 是否把捕获图片下载后发送到当前 AstrBot 会话 |
+| `reply_delivery_mode` | `yunzai_native` | 互斥发送模式：Yunzai 原生、AstrBot 转发或仅捕获 |
 
 地址示例：
 
@@ -106,7 +105,6 @@ Docker:     http://yunzai:1145
 
 ```text
 command: 完整命令，最大 1000 字符
-send_reply: 是否由 Yunzai Bot 原生发送回复，默认 true
 ```
 
 示例：
@@ -202,7 +200,7 @@ Yunzai 插件直接返回图片 `Buffer` 时，图片消息会是紧凑引用：
 }
 ```
 
-媒体 URL 访问时仍需携带与 RPC 相同的 Bearer Token。它用于避免原始 PNG 数据污染 Tool Result 和 AstrBot 日志，不会把共享 Token 放进 URL。当调用显式使用 `send_reply=false` 且开启 `deliver_captured_images` 时，AstrBot 插件会下载图片并调用 `Image.fromBytes` 和 `event.send()`；成功后消息还会包含 `delivered_to_astrbot: true`。
+媒体 URL 访问时仍需携带与 RPC 相同的 Bearer Token。它用于避免原始 PNG 数据污染 Tool Result 和 AstrBot 日志，不会把共享 Token 放进 URL。选择 AstrBot 转发模式或 Yunzai 原生发送明确失败时，AstrBot 会下载图片并调用 `Image.fromBytes` 和 `event.send()`；成功后消息包含 `delivered_to_astrbot: true`。
 
 权限拒绝示例：
 
@@ -221,17 +219,17 @@ Yunzai 插件直接返回图片 `Buffer` 时，图片消息会是紧凑引用：
 
 ## 回复发送策略
 
-默认 `send_reply=true`，沿用初版最快的 Yunzai 原生发送路径。需要同时满足：
+AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_reply` 参数：
 
-1. AstrBot 配置 `allow_send_reply=true`。
-2. Yunzai 配置 `allow_send_reply=true`。
-3. Agent 调用工具时传入 `send_reply=true`。
+| 模式 | 行为 |
+| --- | --- |
+| `yunzai_native` | 默认推荐，沿用初版 `nativeReply`，生成回复时立即由 Yunzai Bot 发送 |
+| `astrbot_forward` | Yunzai 只捕获，AstrBot 下载临时图片并发送到当前会话 |
+| `capture_only` | 只把回复交给 Agent，不实际发送图片 |
 
-上述配置控制的是“由 Yunzai Bot 发送”。现有配置文件中的 `false` 不会在升级时被覆盖，需要手动打开一次。图片另有 AstrBot 后备路径：
+原生模式要求 Yunzai 锅巴中的“Yunzai 原生发送回复”开启。原生发送明确返回失败时，失败图片自动回退到 AstrBot；已成功发送的图片不会重复转发。
 
-- `deliver_captured_images=true`：AstrBot 下载捕获图片并发送到当前 AstrBot 会话。
-- `deliver_captured_images=false`：只在 Tool Result 保留临时媒体 URL。
-- 调用使用 `send_reply=true` 时跳过 AstrBot 图片转发，防止两端重复发送。
+旧版两个布尔配置会兼容迁移，不再同时显示在界面中。
 
 注意：禁止发送回复不等于禁止命令副作用。主人执行配置修改、更新或重启命令时，即使 `send_reply=false`，命令本身仍可能生效。
 
@@ -275,15 +273,33 @@ Yunzai 插件直接返回图片 `Buffer` 时，图片消息会是紧凑引用：
 
 ### Tool Result 出现 `�PNG`、`IHDR` 或大量乱码
 
-旧版 Yunzai 桥接把图片 `Buffer` 转成了字符串。将 AstrBot 和 Yunzai 两端都升级到 `1.3.3`；默认由 Yunzai 原生发送，捕获模式下才由 AstrBot 转发临时媒体。
+旧版 Yunzai 桥接把图片 `Buffer` 转成了字符串。将 AstrBot 和 Yunzai 两端都升级到 `1.3.4`；默认由 Yunzai 原生发送，AstrBot 转发模式才使用临时媒体。
 
 ### 图片 URL 正常但会话没有收到图片
 
-- 确认两端都是 `1.3.3`。
-- 追求初版发送速度时，确认两端 `allow_send_reply=true`。
-- 确认 AstrBot 配置 `deliver_captured_images=true`。
+- 确认两端都是 `1.3.4`。
+- 追求初版速度时，AstrBot 选择 `Yunzai 原生发送`，Yunzai 锅巴开启原生发送。
+- 查看图片消息的 `native_delivery`、`native_delivery_error` 和 `delivered_to_astrbot`。
 - 查看 Tool Result 中的 `delivered_to_astrbot` 和 `delivery_error`。
 - 确认 AstrBot 到 Yunzai 的媒体 URL 仍可访问，图片需要在 5 分钟内下载。
+
+### 机器人说已发送，但实际没有收到
+
+旧版把命令执行成功误当成消息发送成功。`1.3.4` 中应检查：
+
+```json
+{
+  "success": true,
+  "reply_delivery": {
+    "status": "sent",
+    "attempts": 1,
+    "succeeded": 1,
+    "failed": 0
+  }
+}
+```
+
+只有 `reply_delivery.status: "sent"` 才能确认 Yunzai 原生发送成功。图片经过原生或后备路径后还会生成最终结论 `image_delivery.status`；只有它等于 `sent` 时 Agent 才能声称图片已经发出。`failed` 或 `partial` 会给出错误，`no_reply` 表示插件没有调用回复函数。
 
 ## 开发测试
 

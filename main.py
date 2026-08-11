@@ -69,7 +69,7 @@ def _sync_download_media(url: str, token: str, timeout: float) -> tuple[bytes, s
         headers={
             "Accept": "image/*",
             "Authorization": f"Bearer {token}",
-            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.3",
+            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.4",
         },
         method="GET",
     )
@@ -87,7 +87,7 @@ def _sync_download_media(url: str, token: str, timeout: float) -> tuple[bytes, s
     PLUGIN_ID,
     "l52312516-cell",
     "让 AstrBot Agent 通过 HTTP 调用远程 Yunzai 命令和游戏查询模板",
-    "1.3.3",
+    "1.3.4",
 )
 class AstrBotYunzaiBridge(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
@@ -110,6 +110,20 @@ class AstrBotYunzaiBridge(Star):
             return max(1.0, min(float(self._cfg("request_timeout", 30)), 120.0))
         except (TypeError, ValueError):
             return 30.0
+
+    def _reply_delivery_mode(self) -> str:
+        mode = str(self._cfg("reply_delivery_mode", "") or "").strip().lower()
+        if mode in {"yunzai_native", "astrbot_forward", "capture_only"}:
+            return mode
+        legacy_native = self._cfg("allow_send_reply", None)
+        legacy_forward = self._cfg("deliver_captured_images", None)
+        if legacy_native is True:
+            return "yunzai_native"
+        if legacy_forward is True:
+            return "astrbot_forward"
+        if legacy_native is False or legacy_forward is False:
+            return "capture_only"
+        return "yunzai_native"
 
     def _error(self, error: str, duration_ms: int = 0, **extra: Any) -> dict[str, Any]:
         return {
@@ -151,7 +165,7 @@ class AstrBotYunzaiBridge(Star):
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {token}",
-            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.3",
+            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.4",
         }
         body = None
         if payload is not None:
@@ -207,9 +221,9 @@ class AstrBotYunzaiBridge(Star):
         self,
         event: AstrMessageEvent,
         result: dict[str, Any],
-        send_reply: bool,
+        delivery_mode: str,
     ) -> None:
-        if send_reply or not bool(self._cfg("deliver_captured_images", True)):
+        if delivery_mode == "capture_only":
             return
         if Image is None or not hasattr(event, "make_result") or not hasattr(event, "send"):
             return
@@ -220,6 +234,8 @@ class AstrBotYunzaiBridge(Star):
         delivered_messages = []
         for message in result.get("messages", []):
             if not isinstance(message, dict) or message.get("type") != "image":
+                continue
+            if delivery_mode == "yunzai_native" and message.get("native_delivery") != "failed":
                 continue
             media_url = message.get("url")
             if not isinstance(media_url, str) or not media_url.startswith(media_prefix):
@@ -257,6 +273,46 @@ class AstrBotYunzaiBridge(Star):
                 message["delivered_to_astrbot"] = False
                 message["delivery_error"] = f"{type(error).__name__}: {error}"
             logger.warning(f"[Yunzai Bridge] AstrBot 图片发送失败: {type(error).__name__}: {error}")
+
+    @staticmethod
+    def _summarize_image_delivery(result: dict[str, Any]) -> None:
+        images = [
+            message
+            for message in result.get("messages", [])
+            if isinstance(message, dict) and message.get("type") == "image"
+        ]
+        if not images:
+            result["image_delivery"] = {"status": "no_image", "total": 0, "sent": 0, "failed": 0}
+            return
+        sent = sum(
+            1
+            for message in images
+            if message.get("native_delivery") == "sent" or message.get("delivered_to_astrbot") is True
+        )
+        failed = sum(
+            1
+            for message in images
+            if message.get("native_delivery") == "failed" and message.get("delivered_to_astrbot") is not True
+        )
+        capture_only = all(message.get("native_delivery") == "capture_only" for message in images)
+        status = (
+            "sent"
+            if sent == len(images)
+            else "partial"
+            if sent > 0
+            else "failed"
+            if failed > 0
+            else "capture_only"
+            if capture_only
+            else "unknown"
+        )
+        result["image_delivery"] = {
+            "status": status,
+            "total": len(images),
+            "sent": sent,
+            "failed": failed,
+            "confirmed": status == "sent",
+        }
 
     def _rpc_payload(
         self,
@@ -296,24 +352,21 @@ class AstrBotYunzaiBridge(Star):
         self,
         event: AstrMessageEvent,
         command: str,
-        send_reply: bool = True,
     ) -> str:
         """以当前真实会话用户身份执行远程 Yunzai 命令。
 
         Args:
             command(string): 完整 Yunzai 命令；主人全权限，普通用户仅限基础游戏操作和查询。
-            send_reply(boolean): 是否让 Yunzai 原生发送回复，默认 true；关闭时由 AstrBot 转发捕获图片。
-
         Returns:
-            JSON 字符串，包含执行状态和捕获到的消息。
+            JSON 字符串。success 仅表示命令执行；只有 image_delivery.status=sent 才表示图片确认发出。
         """
         command = str(command or "").strip()
         if not command:
             return _json_text(self._error("command 不能为空"))
         if len(command) > MAX_COMMAND_LENGTH:
             return _json_text(self._error(f"command 长度不能超过 {MAX_COMMAND_LENGTH} 个字符"))
-        if send_reply and not bool(self._cfg("allow_send_reply", True)):
-            return _json_text(self._error("AstrBot 插件配置未允许 Agent 发送 Yunzai 消息"))
+        delivery_mode = self._reply_delivery_mode()
+        send_reply = delivery_mode == "yunzai_native"
 
         payload = self._rpc_payload(
             "command.execute",
@@ -322,7 +375,8 @@ class AstrBotYunzaiBridge(Star):
             send_reply,
         )
         result = await self._request("POST", "/astrbot-bridge/v1/rpc", payload)
-        await self._deliver_captured_images(event, result, send_reply)
+        await self._deliver_captured_images(event, result, delivery_mode)
+        self._summarize_image_delivery(result)
         return _json_text(result)
 
     @_tool_decorator("yunzai_game_query")
@@ -334,7 +388,6 @@ class AstrBotYunzaiBridge(Star):
         keyword: str = "",
         uid: str = "",
         args: str = "",
-        send_reply: bool = True,
     ) -> str:
         """通过远程 Yunzai 游戏查询模板执行任意已注册游戏的结构化查询。
 
@@ -344,10 +397,8 @@ class AstrBotYunzaiBridge(Star):
             keyword(string): 查询关键词，例如角色名、图鉴名、攻略关键词。
             uid(string): 可选游戏 UID。
             args(string): 可选附加文本参数，会交给 Yunzai 侧模板渲染。
-            send_reply(boolean): 是否让 Yunzai 原生发送回复，默认 true。
-
         Returns:
-            JSON 字符串，包含渲染出的命令、执行状态和捕获到的消息。
+            JSON 字符串。success 仅表示命令执行；只有 image_delivery.status=sent 才表示图片确认发出。
         """
         game = str(game or "").strip().lower()
         action = str(action or "").strip().lower()
@@ -361,8 +412,8 @@ class AstrBotYunzaiBridge(Star):
         for field_name, value in (("game", game), ("action", action), ("keyword", keyword), ("uid", uid), ("args", args)):
             if len(value) > MAX_COMMAND_LENGTH:
                 return _json_text(self._error(f"{field_name} 长度不能超过 {MAX_COMMAND_LENGTH} 个字符"))
-        if send_reply and not bool(self._cfg("allow_send_reply", True)):
-            return _json_text(self._error("AstrBot 插件配置未允许 Agent 发送 Yunzai 消息"))
+        delivery_mode = self._reply_delivery_mode()
+        send_reply = delivery_mode == "yunzai_native"
 
         payload = self._rpc_payload(
             "game.query",
@@ -377,5 +428,6 @@ class AstrBotYunzaiBridge(Star):
             send_reply,
         )
         result = await self._request("POST", "/astrbot-bridge/v1/rpc", payload)
-        await self._deliver_captured_images(event, result, send_reply)
+        await self._deliver_captured_images(event, result, delivery_mode)
+        self._summarize_image_delivery(result)
         return _json_text(result)

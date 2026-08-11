@@ -18,16 +18,20 @@
     "min": 1,
     "max": 120
   },
-  "allow_send_reply": {
-    "description": "允许 Agent 让 Yunzai 实际发送消息",
-    "type": "bool",
-    "default": true,
-    "hint": "开启后默认沿用初版机制，由 Yunzai Bot 在 event.reply 时直接发送，速度最快。关闭后可由 AstrBot 转发捕获图片。"
-  },
-  "deliver_captured_images": {
-    "description": "把捕获到的 Yunzai 图片发送到当前 AstrBot 会话",
-    "type": "bool",
-    "default": true,
-    "hint": "开启后，插件会下载 Yunzai 临时媒体并使用 AstrBot 原生图片消息发送；send_reply=true 时不会重复发送。"
+  "reply_delivery_mode": {
+    "description": "回复发送模式",
+    "type": "string",
+    "options": [
+      "yunzai_native",
+      "astrbot_forward",
+      "capture_only"
+    ],
+    "labels": [
+      "Yunzai 原生发送（推荐，最快）",
+      "AstrBot 转发捕获图片",
+      "仅捕获，不实际发送"
+    ],
+    "default": "yunzai_native",
+    "hint": "三种模式互斥。原生发送失败的图片会自动回退到 AstrBot 转发，不会重复发送成功图片。"
   }
 }
