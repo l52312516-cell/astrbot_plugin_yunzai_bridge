@@ -69,7 +69,7 @@ def _sync_download_media(url: str, token: str, timeout: float) -> tuple[bytes, s
         headers={
             "Accept": "image/*",
             "Authorization": f"Bearer {token}",
-            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.2",
+            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.3",
         },
         method="GET",
     )
@@ -87,7 +87,7 @@ def _sync_download_media(url: str, token: str, timeout: float) -> tuple[bytes, s
     PLUGIN_ID,
     "l52312516-cell",
     "让 AstrBot Agent 通过 HTTP 调用远程 Yunzai 命令和游戏查询模板",
-    "1.3.2",
+    "1.3.3",
 )
 class AstrBotYunzaiBridge(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
@@ -151,7 +151,7 @@ class AstrBotYunzaiBridge(Star):
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {token}",
-            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.2",
+            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.3",
         }
         body = None
         if payload is not None:
@@ -263,7 +263,7 @@ class AstrBotYunzaiBridge(Star):
         action: str,
         event: AstrMessageEvent,
         body: dict[str, Any],
-        send_reply: bool = False,
+        send_reply: bool = True,
     ) -> dict[str, Any]:
         return {
             "id": uuid.uuid4().hex,
@@ -296,13 +296,13 @@ class AstrBotYunzaiBridge(Star):
         self,
         event: AstrMessageEvent,
         command: str,
-        send_reply: bool = False,
+        send_reply: bool = True,
     ) -> str:
         """以当前真实会话用户身份执行远程 Yunzai 命令。
 
         Args:
             command(string): 完整 Yunzai 命令；主人全权限，普通用户仅限基础游戏操作和查询。
-            send_reply(boolean): 是否让 Yunzai 把命令回复实际发送到目标会话，默认 false。
+            send_reply(boolean): 是否让 Yunzai 原生发送回复，默认 true；关闭时由 AstrBot 转发捕获图片。
 
         Returns:
             JSON 字符串，包含执行状态和捕获到的消息。
@@ -312,7 +312,7 @@ class AstrBotYunzaiBridge(Star):
             return _json_text(self._error("command 不能为空"))
         if len(command) > MAX_COMMAND_LENGTH:
             return _json_text(self._error(f"command 长度不能超过 {MAX_COMMAND_LENGTH} 个字符"))
-        if send_reply and not bool(self._cfg("allow_send_reply", False)):
+        if send_reply and not bool(self._cfg("allow_send_reply", True)):
             return _json_text(self._error("AstrBot 插件配置未允许 Agent 发送 Yunzai 消息"))
 
         payload = self._rpc_payload(
@@ -334,7 +334,7 @@ class AstrBotYunzaiBridge(Star):
         keyword: str = "",
         uid: str = "",
         args: str = "",
-        send_reply: bool = False,
+        send_reply: bool = True,
     ) -> str:
         """通过远程 Yunzai 游戏查询模板执行任意已注册游戏的结构化查询。
 
@@ -344,7 +344,7 @@ class AstrBotYunzaiBridge(Star):
             keyword(string): 查询关键词，例如角色名、图鉴名、攻略关键词。
             uid(string): 可选游戏 UID。
             args(string): 可选附加文本参数，会交给 Yunzai 侧模板渲染。
-            send_reply(boolean): 是否实际发送到目标会话，默认 false。
+            send_reply(boolean): 是否让 Yunzai 原生发送回复，默认 true。
 
         Returns:
             JSON 字符串，包含渲染出的命令、执行状态和捕获到的消息。
@@ -361,7 +361,7 @@ class AstrBotYunzaiBridge(Star):
         for field_name, value in (("game", game), ("action", action), ("keyword", keyword), ("uid", uid), ("args", args)):
             if len(value) > MAX_COMMAND_LENGTH:
                 return _json_text(self._error(f"{field_name} 长度不能超过 {MAX_COMMAND_LENGTH} 个字符"))
-        if send_reply and not bool(self._cfg("allow_send_reply", False)):
+        if send_reply and not bool(self._cfg("allow_send_reply", True)):
             return _json_text(self._error("AstrBot 插件配置未允许 Agent 发送 Yunzai 消息"))
 
         payload = self._rpc_payload(

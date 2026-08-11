@@ -21,8 +21,8 @@
   "allow_send_reply": {
     "description": "允许 Agent 让 Yunzai 实际发送消息",
     "type": "bool",
-    "default": false,
-    "hint": "建议保持关闭。关闭时，send_reply=true 会被拒绝，只把 Yunzai 回复返回给 Agent。"
+    "default": true,
+    "hint": "开启后默认沿用初版机制，由 Yunzai Bot 在 event.reply 时直接发送，速度最快。关闭后可由 AstrBot 转发捕获图片。"
   },
   "deliver_captured_images": {
     "description": "把捕获到的 Yunzai 图片发送到当前 AstrBot 会话",
