@@ -6,6 +6,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from functools import partial
 from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
@@ -59,7 +60,7 @@ def _sync_http_request(
     PLUGIN_ID,
     "l52312516-cell",
     "让 AstrBot Agent 通过 HTTP 调用远程 Yunzai 命令和游戏查询模板",
-    "1.3.0",
+    "1.3.1",
 )
 class AstrBotYunzaiBridge(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
@@ -123,7 +124,7 @@ class AstrBotYunzaiBridge(Star):
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {token}",
-            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.0",
+            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.1",
         }
         body = None
         if payload is not None:
@@ -131,7 +132,7 @@ class AstrBotYunzaiBridge(Star):
             headers["Content-Type"] = "application/json"
 
         try:
-            status, data = await asyncio.to_thread(
+            request_call = partial(
                 _sync_http_request,
                 method,
                 url,
@@ -139,6 +140,11 @@ class AstrBotYunzaiBridge(Star):
                 body,
                 self._timeout(),
             )
+            to_thread = getattr(asyncio, "to_thread", None)
+            if callable(to_thread):
+                status, data = await to_thread(request_call)
+            else:
+                status, data = await asyncio.get_running_loop().run_in_executor(None, request_call)
         except TimeoutError:
             duration = int((time.perf_counter() - started) * 1000)
             return self._error("连接 Yunzai 超时", duration)
@@ -159,6 +165,12 @@ class AstrBotYunzaiBridge(Star):
         result.setdefault("request_id", uuid.uuid4().hex)
         result.setdefault("messages", [])
         result.setdefault("duration_ms", duration)
+        for message in result.get("messages", []):
+            if not isinstance(message, dict):
+                continue
+            media_url = message.get("url")
+            if isinstance(media_url, str) and media_url.startswith("/"):
+                message["url"] = f"{base_url}{media_url}"
         if status >= 400:
             result["success"] = False
             result.setdefault("error", f"Yunzai HTTP {status}")

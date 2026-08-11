@@ -5,7 +5,7 @@ AstrBot 侧联动插件。它向 AI Agent 注册四个工具，通过带 Bearer 
 - 作者：[l52312516-cell](https://github.com/l52312516-cell)
 - 仓库：[l52312516-cell/astrbot_plugin_yunzai_bridge](https://github.com/l52312516-cell/astrbot_plugin_yunzai_bridge)
 - 配套 Yunzai 插件：[l52312516-cell/yunzai_plugin_astrbot_bridge](https://github.com/l52312516-cell/yunzai_plugin_astrbot_bridge)
-- 当前版本：`1.3.0`
+- 当前版本：`1.3.1`
 
 ## 功能
 
@@ -14,6 +14,7 @@ AstrBot 侧联动插件。它向 AI Agent 注册四个工具，通过带 Bearer 
 - 以当前 AstrBot 消息发送者身份执行 Yunzai 命令。
 - 通过统一的 `game/action/keyword/uid/args` 参数调用任意游戏模板。
 - 捕获 Yunzai 返回的文字、图片和其他消息段。
+- 自动把 Yunzai 的相对临时媒体路径补全为完整 URL，不在工具日志中展开图片二进制。
 - 默认不让 Yunzai 把回复真正发送到群聊或私聊。
 - 不向 Agent 暴露 `user_id`、`group_id` 或 `bot_id` 覆盖参数。
 
@@ -185,6 +186,23 @@ Yunzai 端忽略 RPC 中的 Bot ID，并使用自己的 `default_bot_id` 或默�
 }
 ```
 
+Yunzai 插件直接返回图片 `Buffer` 时，图片消息会是紧凑引用：
+
+```json
+{
+  "type": "image",
+  "url": "http://127.0.0.1:1145/astrbot-bridge/v1/media/<随机ID>",
+  "mime_type": "image/png",
+  "size_bytes": 123456,
+  "sha256": "...",
+  "temporary": true,
+  "expires_in_seconds": 300,
+  "requires_bearer_token": true
+}
+```
+
+媒体 URL 访问时仍需携带与 RPC 相同的 Bearer Token。它用于避免原始 PNG 数据污染 Tool Result 和 AstrBot 日志，不会把共享 Token 放进 URL。
+
 权限拒绝示例：
 
 ```json
@@ -248,9 +266,13 @@ Yunzai 端忽略 RPC 中的 Bot ID，并使用自己的 `default_bot_id` 或默�
 - 当前 AstrBot 版本需支持 LLM Tool；插件为旧版装饰器保留了兼容导入逻辑。
 - 重新加载插件并新建一次 Agent 会话。
 
+### Tool Result 出现 `�PNG`、`IHDR` 或大量乱码
+
+旧版 Yunzai 桥接把图片 `Buffer` 转成了字符串。将 AstrBot 和 Yunzai 两端都升级到 `1.3.1`；新版日志只保留临时图片 URL 和摘要。
+
 ## 开发测试
 
-本插件仅使用 Python 标准库发起 HTTP 请求，不需要额外 pip 依赖。
+本插件仅使用 Python 标准库发起 HTTP 请求，不需要额外 pip 依赖。Python 3.8 使用 `run_in_executor`，支持 `asyncio.to_thread` 的版本会自动使用后者。
 
 ```bash
 python tests/test_astrbot_bridge.py
