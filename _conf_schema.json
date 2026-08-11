@@ -1,0 +1,27 @@
+{
+  "yunzai_url": {
+    "description": "Yunzai 桥接服务地址",
+    "type": "string",
+    "default": "",
+    "hint": "同机填写 http://127.0.0.1:1145；局域网填写 http://Yunzai服务器IP:1145。"
+  },
+  "token": {
+    "description": "共享 Token",
+    "type": "string",
+    "default": "",
+    "hint": "必须与 Yunzai 插件配置中的 token 完全一致。"
+  },
+  "request_timeout": {
+    "description": "请求超时秒数",
+    "type": "int",
+    "default": 30,
+    "min": 1,
+    "max": 120
+  },
+  "allow_send_reply": {
+    "description": "允许 Agent 让 Yunzai 实际发送消息",
+    "type": "bool",
+    "default": false,
+    "hint": "建议保持关闭。关闭时，send_reply=true 会被拒绝，只把 Yunzai 回复返回给 Agent。"
+  }
+}
