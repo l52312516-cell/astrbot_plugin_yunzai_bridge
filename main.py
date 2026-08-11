@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -15,9 +17,9 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
 try:
-    from astrbot.api.message_components import Image
+    from astrbot.api.message_components import File, Image, Json, Music, Record, Share, Video
 except ImportError:
-    Image = None
+    File = Image = Json = Music = Record = Share = Video = None
 
 
 PLUGIN_ID = "astrbot_plugin_yunzai_bridge"
@@ -67,9 +69,9 @@ def _sync_download_media(url: str, token: str, timeout: float) -> tuple[bytes, s
     request = urllib.request.Request(
         url,
         headers={
-            "Accept": "image/*",
+            "Accept": "*/*",
             "Authorization": f"Bearer {token}",
-            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.7",
+            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.8",
         },
         method="GET",
     )
@@ -77,9 +79,9 @@ def _sync_download_media(url: str, token: str, timeout: float) -> tuple[bytes, s
         data = response.read(MAX_MEDIA_BYTES + 1)
         content_type = str(response.headers.get("Content-Type") or "application/octet-stream").split(";", 1)[0]
     if len(data) > MAX_MEDIA_BYTES:
-        raise ValueError(f"图片超过 {MAX_MEDIA_BYTES // 1024 // 1024} MiB 限制")
+        raise ValueError(f"媒体超过 {MAX_MEDIA_BYTES // 1024 // 1024} MiB 限制")
     if not data:
-        raise ValueError("图片内容为空")
+        raise ValueError("媒体内容为空")
     return data, content_type
 
 
@@ -87,7 +89,7 @@ def _sync_download_media(url: str, token: str, timeout: float) -> tuple[bytes, s
     PLUGIN_ID,
     "l52312516-cell",
     "让 AstrBot Agent 通过 HTTP 调用远程 Yunzai 命令和游戏查询模板",
-    "1.3.7",
+    "1.3.8",
 )
 class AstrBotYunzaiBridge(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
@@ -198,7 +200,7 @@ class AstrBotYunzaiBridge(Star):
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {token}",
-            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.7",
+            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.8",
         }
         body = None
         if payload is not None:
@@ -242,15 +244,90 @@ class AstrBotYunzaiBridge(Star):
         for message in result.get("messages", []):
             if not isinstance(message, dict):
                 continue
-            media_url = message.get("url")
-            if isinstance(media_url, str) and media_url.startswith("/"):
-                message["url"] = f"{base_url}{media_url}"
+            for field_name in ("url", "audio", "image"):
+                media_url = message.get(field_name)
+                if isinstance(media_url, str) and media_url.startswith("/"):
+                    message[field_name] = f"{base_url}{media_url}"
         if status >= 400:
             result["success"] = False
             result.setdefault("error", f"Yunzai HTTP {status}")
         return result
 
-    async def _deliver_captured_images(
+    async def _download_media(self, url: str) -> tuple[bytes, str]:
+        download_call = partial(_sync_download_media, url, self._token(), self._timeout())
+        to_thread = getattr(asyncio, "to_thread", None)
+        if callable(to_thread):
+            return await to_thread(download_call)
+        return await asyncio.get_running_loop().run_in_executor(None, download_call)
+
+    async def _media_component(self, message: dict[str, Any], temporary_files: list[str]) -> Any:
+        media_type = str(message.get("type") or "").lower()
+        media_url = str(message.get("url") or "")
+        media_prefix = f"{self._base_url()}/astrbot-bridge/v1/media/"
+        is_bridge_media = bool(media_url and media_url.startswith(media_prefix))
+
+        if media_type == "image" and Image is not None:
+            if is_bridge_media:
+                media_data, _ = await self._download_media(media_url)
+                from_bytes = getattr(Image, "fromBytes", None)
+                return from_bytes(media_data) if callable(from_bytes) else Image.fromBase64(base64.b64encode(media_data).decode("ascii"))
+            if media_url.startswith(("http://", "https://")):
+                return Image.fromURL(media_url)
+
+        if media_type == "record" and Record is not None:
+            if is_bridge_media:
+                media_data, _ = await self._download_media(media_url)
+                return Record.fromBase64(base64.b64encode(media_data).decode("ascii"))
+            if media_url.startswith(("http://", "https://")):
+                return Record.fromURL(media_url)
+
+        if media_type == "video" and Video is not None:
+            if is_bridge_media:
+                media_data, _ = await self._download_media(media_url)
+                return Video.fromBase64(base64.b64encode(media_data).decode("ascii"))
+            if media_url.startswith(("http://", "https://")):
+                return Video.fromURL(media_url)
+
+        if media_type == "file" and File is not None:
+            name = str(message.get("name") or "yunzai-media.bin")
+            if is_bridge_media:
+                media_data, _ = await self._download_media(media_url)
+                suffix = os.path.splitext(name)[1][:16]
+                with tempfile.NamedTemporaryFile(prefix="yunzai_bridge_", suffix=suffix, delete=False) as temp_file:
+                    temp_file.write(media_data)
+                    temp_path = temp_file.name
+                temporary_files.append(temp_path)
+                return File(name=name, file=temp_path)
+            if media_url.startswith(("http://", "https://")):
+                return File(name=name, url=media_url)
+
+        if media_type == "music" and Music is not None:
+            raw_id = message.get("id", 0)
+            music_id = int(raw_id) if str(raw_id).isdigit() else 0
+            return Music(
+                _type=str(message.get("music_type") or "custom"),
+                id=music_id,
+                url=str(message.get("url") or ""),
+                audio=str(message.get("audio") or ""),
+                title=str(message.get("title") or ""),
+                content=str(message.get("content") or ""),
+                image=str(message.get("image") or ""),
+            )
+
+        if media_type == "json" and Json is not None:
+            return Json(data=message.get("data") or {})
+
+        if media_type == "share" and Share is not None:
+            return Share(
+                url=str(message.get("url") or ""),
+                title=str(message.get("title") or ""),
+                content=str(message.get("content") or ""),
+                image=str(message.get("image") or ""),
+            )
+
+        raise ValueError(f"不支持或缺少可用内容的媒体类型: {media_type or 'unknown'}")
+
+    async def _deliver_captured_media(
         self,
         event: AstrMessageEvent,
         result: dict[str, Any],
@@ -258,41 +335,33 @@ class AstrBotYunzaiBridge(Star):
     ) -> None:
         if delivery_mode == "capture_only":
             return
-        if Image is None or not hasattr(event, "make_result") or not hasattr(event, "send"):
+        if not hasattr(event, "make_result") or not hasattr(event, "send"):
             return
 
-        base_url = self._base_url()
-        media_prefix = f"{base_url}/astrbot-bridge/v1/media/"
+        supported_types = {"image", "record", "video", "file", "music", "json", "share"}
         components = []
         delivered_messages = []
+        temporary_files: list[str] = []
         for message in result.get("messages", []):
-            if not isinstance(message, dict) or message.get("type") != "image":
+            if not isinstance(message, dict) or str(message.get("type") or "").lower() not in supported_types:
                 continue
             if delivery_mode == "yunzai_native" and message.get("native_delivery") != "failed":
                 continue
-            media_url = message.get("url")
-            if not isinstance(media_url, str) or not media_url.startswith(media_prefix):
-                continue
             try:
-                download_call = partial(_sync_download_media, media_url, self._token(), self._timeout())
-                to_thread = getattr(asyncio, "to_thread", None)
-                if callable(to_thread):
-                    image_data, _ = await to_thread(download_call)
-                else:
-                    image_data, _ = await asyncio.get_running_loop().run_in_executor(None, download_call)
-                from_bytes = getattr(Image, "fromBytes", None)
-                if callable(from_bytes):
-                    component = from_bytes(image_data)
-                else:
-                    component = Image.fromBase64(base64.b64encode(image_data).decode("ascii"))
+                component = await self._media_component(message, temporary_files)
                 components.append(component)
                 delivered_messages.append(message)
             except Exception as error:
                 message["delivered_to_astrbot"] = False
                 message["delivery_error"] = f"{type(error).__name__}: {error}"
-                logger.warning(f"[Yunzai Bridge] 图片转发失败: {type(error).__name__}: {error}")
+                logger.warning(f"[Yunzai Bridge] 媒体转发失败: {type(error).__name__}: {error}")
 
         if not components:
+            for temp_path in temporary_files:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
             return
         try:
             send_result = event.make_result()
@@ -305,47 +374,35 @@ class AstrBotYunzaiBridge(Star):
             for message in delivered_messages:
                 message["delivered_to_astrbot"] = False
                 message["delivery_error"] = f"{type(error).__name__}: {error}"
-            logger.warning(f"[Yunzai Bridge] AstrBot 图片发送失败: {type(error).__name__}: {error}")
+            logger.warning(f"[Yunzai Bridge] AstrBot 媒体发送失败: {type(error).__name__}: {error}")
+        finally:
+            for temp_path in temporary_files:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
 
     @staticmethod
-    def _summarize_image_delivery(result: dict[str, Any]) -> None:
-        images = [
+    def _delivery_summary(messages: list[dict[str, Any]], empty_status: str) -> dict[str, Any]:
+        if not messages:
+            return {"status": empty_status, "total": 0, "sent": 0, "failed": 0, "confirmed": False}
+        sent = sum(1 for message in messages if message.get("native_delivery") == "sent" or message.get("delivered_to_astrbot") is True)
+        failed = sum(1 for message in messages if message.get("delivered_to_astrbot") is False or (message.get("native_delivery") == "failed" and message.get("delivered_to_astrbot") is not True))
+        capture_only = all(message.get("native_delivery") == "capture_only" and message.get("delivered_to_astrbot") is not True for message in messages)
+        status = "sent" if sent == len(messages) else "partial" if sent > 0 else "failed" if failed > 0 else "capture_only" if capture_only else "unknown"
+        return {"status": status, "total": len(messages), "sent": sent, "failed": failed, "confirmed": status == "sent"}
+
+    @classmethod
+    def _summarize_media_delivery(cls, result: dict[str, Any]) -> None:
+        media_types = {"image", "record", "video", "file", "music", "json", "share"}
+        media = [
             message
             for message in result.get("messages", [])
-            if isinstance(message, dict) and message.get("type") == "image"
+            if isinstance(message, dict) and str(message.get("type") or "").lower() in media_types
         ]
-        if not images:
-            result["image_delivery"] = {"status": "no_image", "total": 0, "sent": 0, "failed": 0}
-            return
-        sent = sum(
-            1
-            for message in images
-            if message.get("native_delivery") == "sent" or message.get("delivered_to_astrbot") is True
-        )
-        failed = sum(
-            1
-            for message in images
-            if message.get("native_delivery") == "failed" and message.get("delivered_to_astrbot") is not True
-        )
-        capture_only = all(message.get("native_delivery") == "capture_only" for message in images)
-        status = (
-            "sent"
-            if sent == len(images)
-            else "partial"
-            if sent > 0
-            else "failed"
-            if failed > 0
-            else "capture_only"
-            if capture_only
-            else "unknown"
-        )
-        result["image_delivery"] = {
-            "status": status,
-            "total": len(images),
-            "sent": sent,
-            "failed": failed,
-            "confirmed": status == "sent",
-        }
+        images = [message for message in media if message.get("type") == "image"]
+        result["media_delivery"] = cls._delivery_summary(media, "no_media")
+        result["image_delivery"] = cls._delivery_summary(images, "no_image")
 
     def _rpc_payload(
         self,
@@ -392,7 +449,7 @@ class AstrBotYunzaiBridge(Star):
         Args:
             command(string): 完整 Yunzai 命令；主人全权限，普通用户仅限基础游戏操作和查询。
         Returns:
-            JSON 字符串。success 仅表示命令执行；只有 image_delivery.status=sent 才表示图片确认发出。
+            JSON 字符串。success 仅表示命令执行；只有 media_delivery.status=sent 才表示媒体确认发出。不得编造 401、授权或待投递状态。
         """
         command = str(command or "").strip()
         if not command:
@@ -409,8 +466,8 @@ class AstrBotYunzaiBridge(Star):
             send_reply,
         )
         result = await self._request("POST", "/astrbot-bridge/v1/rpc", payload)
-        await self._deliver_captured_images(event, result, delivery_mode)
-        self._summarize_image_delivery(result)
+        await self._deliver_captured_media(event, result, delivery_mode)
+        self._summarize_media_delivery(result)
         if legacy_kwargs:
             result["ignored_legacy_tool_args"] = sorted(legacy_kwargs)
         return _json_text(result)
@@ -435,7 +492,7 @@ class AstrBotYunzaiBridge(Star):
             uid(string): 可选游戏 UID。
             args(string): 可选附加文本参数，会交给 Yunzai 侧模板渲染。
         Returns:
-            JSON 字符串。success 仅表示命令执行；只有 image_delivery.status=sent 才表示图片确认发出。
+            JSON 字符串。success 仅表示命令执行；只有 media_delivery.status=sent 才表示媒体确认发出。不得编造 401、授权或待投递状态。
         """
         game = str(game or "").strip().lower()
         action = str(action or "").strip().lower()
@@ -465,8 +522,8 @@ class AstrBotYunzaiBridge(Star):
             send_reply,
         )
         result = await self._request("POST", "/astrbot-bridge/v1/rpc", payload)
-        await self._deliver_captured_images(event, result, delivery_mode)
-        self._summarize_image_delivery(result)
+        await self._deliver_captured_media(event, result, delivery_mode)
+        self._summarize_media_delivery(result)
         if legacy_kwargs:
             result["ignored_legacy_tool_args"] = sorted(legacy_kwargs)
         return _json_text(result)

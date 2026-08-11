@@ -5,7 +5,7 @@ AstrBot 侧联动插件。它向 AI Agent 注册四个工具，通过带 Bearer 
 - 作者：[l52312516-cell](https://github.com/l52312516-cell)
 - 仓库：[l52312516-cell/astrbot_plugin_yunzai_bridge](https://github.com/l52312516-cell/astrbot_plugin_yunzai_bridge)
 - 配套 Yunzai 插件：[l52312516-cell/yunzai_plugin_astrbot_bridge](https://github.com/l52312516-cell/yunzai_plugin_astrbot_bridge)
-- 当前版本：`1.3.7`
+- 当前版本：`1.3.8`
 
 ## 功能
 
@@ -13,8 +13,8 @@ AstrBot 侧联动插件。它向 AI Agent 注册四个工具，通过带 Bearer 
 - 获取 Yunzai 的分级权限策略、结构化游戏模板和已加载插件规则。
 - 以当前 AstrBot 消息发送者身份执行 Yunzai 命令。
 - 通过统一的 `game/action/keyword/uid/args` 参数调用任意游戏模板。
-- 捕获 Yunzai 返回的文字、图片和其他消息段。
-- 自动下载 Yunzai 临时媒体，并通过 AstrBot 原生 `Image` 消息发送到当前会话。
+- 捕获 Yunzai 返回的文字、图片、音乐卡片、QQ JSON 卡片、分享、语音、视频和文件消息段。
+- AstrBot 转发模式会映射为原生 `Image`、`Music`、`Json`、`Share`、`Record`、`Video` 和 `File` 组件并发送到当前会话。
 - 默认沿用初版机制，让 Yunzai Bot 通过 `nativeReply` 立即发送回复。
 - 不向 Agent 暴露 `user_id`、`group_id` 或 `bot_id` 覆盖参数。
 
@@ -209,7 +209,9 @@ Yunzai 插件直接返回图片 `Buffer` 时，图片消息会是紧凑引用：
 }
 ```
 
-媒体 URL 访问时仍需携带与 RPC 相同的 Bearer Token。它用于避免原始 PNG 数据污染 Tool Result 和 AstrBot 日志，不会把共享 Token 放进 URL。选择 AstrBot 转发模式或 Yunzai 原生发送明确失败时，AstrBot 会下载图片并调用 `Image.fromBytes` 和 `event.send()`；成功后消息包含 `delivered_to_astrbot: true`。
+媒体 URL 访问时仍需携带与 RPC 相同的 Bearer Token。它用于避免原始图片、语音、视频或文件数据污染 Tool Result 和 AstrBot 日志，不会把共享 Token 放进 URL。选择 AstrBot 转发模式或 Yunzai 原生发送明确失败时，AstrBot 会转换对应消息组件并调用 `event.send()`；成功后消息包含 `delivered_to_astrbot: true`。
+
+图片兼容状态保留在 `image_delivery`；图片、音乐卡片、JSON 卡片、分享、语音、视频和文件的统一结果看 `media_delivery.status`。只有 `sent` 才能声称媒体已发出。Agent 不应根据媒体 URL、大小或 `success:true` 推测“正在投递”，也不能编造 `401`、Bearer 授权或“需要管理员放行”；真实失败原因只读取 `delivery_error` 和 `native_delivery_error`。
 
 权限拒绝示例：
 
@@ -240,7 +242,7 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 
 旧版 `allow_send_reply` 与 `deliver_captured_images` 布尔配置会被忽略，避免历史值冲突后静默进入仅捕获模式。升级后只读取 `reply_delivery_mode`；该字段缺失时默认 `yunzai_native`。
 
-`1.3.7` 兼容 AstrBot 热更新后残留的旧 Tool Schema。即使旧 Schema 仍传入 `send_reply`、`user_id`、`group_id` 或 `bot_id`，工具也只会记录并忽略这些参数；发送模式仍只服从 `reply_delivery_mode`，身份仍只取当前真实会话。
+`1.3.8` 兼容 AstrBot 热更新后残留的旧 Tool Schema。即使旧 Schema 仍传入 `send_reply`、`user_id`、`group_id` 或 `bot_id`，工具也只会记录并忽略这些参数；发送模式仍只服从 `reply_delivery_mode`，身份仍只取当前真实会话。
 
 注意：禁止发送回复不等于禁止命令副作用。主人执行配置修改、更新或重启命令时，即使 `send_reply=false`，命令本身仍可能生效。
 
@@ -256,9 +258,9 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 
 ### `got an unexpected keyword argument 'send_reply'`
 
-这是 AstrBot 热更新后仍使用旧 Tool Schema 导致的。升级 AstrBot 端插件到 `1.3.7`，然后在插件管理中停用并重新启用插件；如果日志仍出现旧签名，完整重启 AstrBot 以清理工具缓存。
+这是 AstrBot 热更新后仍使用旧 Tool Schema 导致的。升级 AstrBot 端插件到 `1.3.8`，然后在插件管理中停用并重新启用插件；如果日志仍出现旧签名，完整重启 AstrBot 以清理工具缓存。
 
-`1.3.7` 会兼容接收并忽略旧 `send_reply` 参数，因此旧缓存不会再让工具执行抛出 `TypeError`。不要把 `send_reply` 加回 Agent 参数；真实发送方式由插件配置中的单一 `reply_delivery_mode` 决定。
+`1.3.8` 会兼容接收并忽略旧 `send_reply` 参数，因此旧缓存不会再让工具执行抛出 `TypeError`。不要把 `send_reply` 加回 Agent 参数；真实发送方式由插件配置中的单一 `reply_delivery_mode` 决定。
 
 ### `未配置 Yunzai 地址`
 
@@ -290,11 +292,11 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 
 ### Tool Result 出现 `�PNG`、`IHDR` 或大量乱码
 
-旧版 Yunzai 桥接把图片 `Buffer` 转成了字符串。将 AstrBot 和 Yunzai 两端都升级到 `1.3.7`；默认由 Yunzai 原生发送，AstrBot 转发模式才使用临时媒体。
+旧版 Yunzai 桥接把图片 `Buffer` 转成了字符串。将 AstrBot 和 Yunzai 两端都升级到 `1.3.8`；默认由 Yunzai 原生发送，AstrBot 转发模式才使用临时媒体。
 
 ### 图片 URL 正常但会话没有收到图片
 
-- 确认两端都是 `1.3.7`。
+- 确认两端都是 `1.3.8`。
 - 追求初版速度时，AstrBot 选择 `Yunzai 原生发送`；Yunzai 端不再有第二个发送开关。
 - 查看图片消息的 `native_delivery`、`native_delivery_error` 和 `delivered_to_astrbot`。
 - 查看 Tool Result 中的 `delivered_to_astrbot` 和 `delivery_error`。
@@ -302,7 +304,7 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 
 ### 机器人说已发送，但实际没有收到
 
-旧版把命令执行成功误当成消息发送成功。`1.3.7` 中应检查：
+旧版把命令执行成功误当成消息发送成功。`1.3.8` 中应检查：
 
 ```json
 {
@@ -333,7 +335,11 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 }
 ```
 
-群聊中的 `message_type` 或 `group_id` 不正确，说明会话适配字段异常；`1.3.7` 优先使用 `unified_msg_origin`。如果 `effective_target` 正确但仍投递到别处，需要检查 Yunzai `default_bot_id` 对应的适配器和 Bot 账号。
+群聊中的 `message_type` 或 `group_id` 不正确，说明会话适配字段异常；`1.3.8` 优先使用 `unified_msg_origin`。如果 `effective_target` 正确但仍投递到别处，需要检查 Yunzai `default_bot_id` 对应的适配器和 Bot 账号。
+
+### 点歌成功但音乐卡片没有发送，AI声称遇到401
+
+旧版只实际转发图片，`music`、`json`、`record` 等消息段只作为数据返回给 Agent，Agent 可能据此虚构“401、Bearer Token 或待投递”。升级双端到 `1.3.8`。新版会实际发送音乐/JSON卡片和媒体，并通过 `media_delivery` 返回确认状态；不存在要求管理员额外配置媒体 Bearer 授权的步骤。
 
 ## 开发测试
 

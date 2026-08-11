@@ -28,7 +28,7 @@
     ],
     "labels": [
       "Yunzai 原生发送（需配置 Yunzai Bot ID 并重启）",
-      "AstrBot 转发捕获图片（无需 Yunzai Bot ID）",
+      "AstrBot 转发捕获媒体（无需 Yunzai Bot ID）",
       "仅捕获，不实际发送"
     ],
     "default": "yunzai_native",
