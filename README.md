@@ -5,7 +5,7 @@ AstrBot 侧联动插件。它向 AI Agent 注册四个工具，通过带 Bearer 
 - 作者：[l52312516-cell](https://github.com/l52312516-cell)
 - 仓库：[l52312516-cell/astrbot_plugin_yunzai_bridge](https://github.com/l52312516-cell/astrbot_plugin_yunzai_bridge)
 - 配套 Yunzai 插件：[l52312516-cell/yunzai_plugin_astrbot_bridge](https://github.com/l52312516-cell/yunzai_plugin_astrbot_bridge)
-- 当前版本：`1.3.1`
+- 当前版本：`1.3.2`
 
 ## 功能
 
@@ -14,7 +14,7 @@ AstrBot 侧联动插件。它向 AI Agent 注册四个工具，通过带 Bearer 
 - 以当前 AstrBot 消息发送者身份执行 Yunzai 命令。
 - 通过统一的 `game/action/keyword/uid/args` 参数调用任意游戏模板。
 - 捕获 Yunzai 返回的文字、图片和其他消息段。
-- 自动把 Yunzai 的相对临时媒体路径补全为完整 URL，不在工具日志中展开图片二进制。
+- 自动下载 Yunzai 临时媒体，并通过 AstrBot 原生 `Image` 消息发送到当前会话。
 - 默认不让 Yunzai 把回复真正发送到群聊或私聊。
 - 不向 Agent 暴露 `user_id`、`group_id` 或 `bot_id` 覆盖参数。
 
@@ -63,6 +63,7 @@ git clone https://github.com/l52312516-cell/astrbot_plugin_yunzai_bridge.git
 | `token` | 空 | 与 Yunzai 端完全一致的共享 Token |
 | `request_timeout` | `30` | HTTP 请求超时秒数，范围 `1-120` |
 | `allow_send_reply` | `false` | 是否允许 Agent 请求 Yunzai 把回复发送到真实会话 |
+| `deliver_captured_images` | `true` | 是否把捕获图片下载后发送到当前 AstrBot 会话 |
 
 地址示例：
 
@@ -201,7 +202,7 @@ Yunzai 插件直接返回图片 `Buffer` 时，图片消息会是紧凑引用：
 }
 ```
 
-媒体 URL 访问时仍需携带与 RPC 相同的 Bearer Token。它用于避免原始 PNG 数据污染 Tool Result 和 AstrBot 日志，不会把共享 Token 放进 URL。
+媒体 URL 访问时仍需携带与 RPC 相同的 Bearer Token。它用于避免原始 PNG 数据污染 Tool Result 和 AstrBot 日志，不会把共享 Token 放进 URL。默认开启 `deliver_captured_images` 时，AstrBot 插件会下载图片并调用 `Image.fromBytes` 和 `event.send()`；成功后消息还会包含 `delivered_to_astrbot: true`。
 
 权限拒绝示例：
 
@@ -225,6 +226,12 @@ Yunzai 插件直接返回图片 `Buffer` 时，图片消息会是紧凑引用：
 1. AstrBot 配置 `allow_send_reply=true`。
 2. Yunzai 配置 `allow_send_reply=true`。
 3. Agent 调用工具时传入 `send_reply=true`。
+
+上述配置控制的是“由 Yunzai Bot 发送”。图片还有一条默认开启的 AstrBot 转发路径：
+
+- `deliver_captured_images=true`：AstrBot 下载捕获图片并发送到当前 AstrBot 会话。
+- `deliver_captured_images=false`：只在 Tool Result 保留临时媒体 URL。
+- 调用使用 `send_reply=true` 时跳过 AstrBot 图片转发，防止两端重复发送。
 
 注意：禁止发送回复不等于禁止命令副作用。主人执行配置修改、更新或重启命令时，即使 `send_reply=false`，命令本身仍可能生效。
 
@@ -268,7 +275,14 @@ Yunzai 插件直接返回图片 `Buffer` 时，图片消息会是紧凑引用：
 
 ### Tool Result 出现 `�PNG`、`IHDR` 或大量乱码
 
-旧版 Yunzai 桥接把图片 `Buffer` 转成了字符串。将 AstrBot 和 Yunzai 两端都升级到 `1.3.1`；新版日志只保留临时图片 URL 和摘要。
+旧版 Yunzai 桥接把图片 `Buffer` 转成了字符串。将 AstrBot 和 Yunzai 两端都升级到 `1.3.2`；新版日志只保留临时图片 URL 和摘要，并由 AstrBot 原生消息发送图片。
+
+### 图片 URL 正常但会话没有收到图片
+
+- 确认两端都是 `1.3.2`，`1.3.1` 只生成媒体 URL。
+- 确认 AstrBot 配置 `deliver_captured_images=true`。
+- 查看 Tool Result 中的 `delivered_to_astrbot` 和 `delivery_error`。
+- 确认 AstrBot 到 Yunzai 的媒体 URL 仍可访问，图片需要在 5 分钟内下载。
 
 ## 开发测试
 

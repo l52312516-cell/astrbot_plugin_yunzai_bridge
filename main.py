@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import time
 import urllib.error
@@ -13,9 +14,15 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
+try:
+    from astrbot.api.message_components import Image
+except ImportError:
+    Image = None
+
 
 PLUGIN_ID = "astrbot_plugin_yunzai_bridge"
 MAX_COMMAND_LENGTH = 1000
+MAX_MEDIA_BYTES = 20 * 1024 * 1024
 
 
 def _tool_decorator(name: str):
@@ -56,11 +63,31 @@ def _sync_http_request(
         return status, {"raw": text}
 
 
+def _sync_download_media(url: str, token: str, timeout: float) -> tuple[bytes, str]:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "image/*",
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.2",
+        },
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        data = response.read(MAX_MEDIA_BYTES + 1)
+        content_type = str(response.headers.get("Content-Type") or "application/octet-stream").split(";", 1)[0]
+    if len(data) > MAX_MEDIA_BYTES:
+        raise ValueError(f"图片超过 {MAX_MEDIA_BYTES // 1024 // 1024} MiB 限制")
+    if not data:
+        raise ValueError("图片内容为空")
+    return data, content_type
+
+
 @register(
     PLUGIN_ID,
     "l52312516-cell",
     "让 AstrBot Agent 通过 HTTP 调用远程 Yunzai 命令和游戏查询模板",
-    "1.3.1",
+    "1.3.2",
 )
 class AstrBotYunzaiBridge(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
@@ -124,7 +151,7 @@ class AstrBotYunzaiBridge(Star):
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {token}",
-            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.1",
+            "User-Agent": "AstrBot-Yunzai-Bridge/1.3.2",
         }
         body = None
         if payload is not None:
@@ -175,6 +202,61 @@ class AstrBotYunzaiBridge(Star):
             result["success"] = False
             result.setdefault("error", f"Yunzai HTTP {status}")
         return result
+
+    async def _deliver_captured_images(
+        self,
+        event: AstrMessageEvent,
+        result: dict[str, Any],
+        send_reply: bool,
+    ) -> None:
+        if send_reply or not bool(self._cfg("deliver_captured_images", True)):
+            return
+        if Image is None or not hasattr(event, "make_result") or not hasattr(event, "send"):
+            return
+
+        base_url = self._base_url()
+        media_prefix = f"{base_url}/astrbot-bridge/v1/media/"
+        components = []
+        delivered_messages = []
+        for message in result.get("messages", []):
+            if not isinstance(message, dict) or message.get("type") != "image":
+                continue
+            media_url = message.get("url")
+            if not isinstance(media_url, str) or not media_url.startswith(media_prefix):
+                continue
+            try:
+                download_call = partial(_sync_download_media, media_url, self._token(), self._timeout())
+                to_thread = getattr(asyncio, "to_thread", None)
+                if callable(to_thread):
+                    image_data, _ = await to_thread(download_call)
+                else:
+                    image_data, _ = await asyncio.get_running_loop().run_in_executor(None, download_call)
+                from_bytes = getattr(Image, "fromBytes", None)
+                if callable(from_bytes):
+                    component = from_bytes(image_data)
+                else:
+                    component = Image.fromBase64(base64.b64encode(image_data).decode("ascii"))
+                components.append(component)
+                delivered_messages.append(message)
+            except Exception as error:
+                message["delivered_to_astrbot"] = False
+                message["delivery_error"] = f"{type(error).__name__}: {error}"
+                logger.warning(f"[Yunzai Bridge] 图片转发失败: {type(error).__name__}: {error}")
+
+        if not components:
+            return
+        try:
+            send_result = event.make_result()
+            for component in components:
+                send_result.chain.append(component)
+            await event.send(send_result)
+            for message in delivered_messages:
+                message["delivered_to_astrbot"] = True
+        except Exception as error:
+            for message in delivered_messages:
+                message["delivered_to_astrbot"] = False
+                message["delivery_error"] = f"{type(error).__name__}: {error}"
+            logger.warning(f"[Yunzai Bridge] AstrBot 图片发送失败: {type(error).__name__}: {error}")
 
     def _rpc_payload(
         self,
@@ -239,7 +321,9 @@ class AstrBotYunzaiBridge(Star):
             {"command": command},
             send_reply,
         )
-        return _json_text(await self._request("POST", "/astrbot-bridge/v1/rpc", payload))
+        result = await self._request("POST", "/astrbot-bridge/v1/rpc", payload)
+        await self._deliver_captured_images(event, result, send_reply)
+        return _json_text(result)
 
     @_tool_decorator("yunzai_game_query")
     async def yunzai_game_query(
@@ -292,4 +376,6 @@ class AstrBotYunzaiBridge(Star):
             },
             send_reply,
         )
-        return _json_text(await self._request("POST", "/astrbot-bridge/v1/rpc", payload))
+        result = await self._request("POST", "/astrbot-bridge/v1/rpc", payload)
+        await self._deliver_captured_images(event, result, send_reply)
+        return _json_text(result)
