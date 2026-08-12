@@ -1,11 +1,11 @@
 # AstrBot Yunzai Bridge
 
-AstrBot 侧联动插件。它向 AI Agent 注册四个工具，通过带 Bearer Token 的 HTTP RPC 调用远程 Yunzai，并把 Yunzai 插件回复转换为 Agent 可读取的 JSON。
+AstrBot 侧联动插件。它固定注册四个基础工具，并根据 Yunzai 已加载插件动态注册最多七个分类工具。所有调用都通过带 Bearer Token 的 HTTP RPC 发送，并把 Yunzai 插件回复转换为 Agent 可读取的 JSON。
 
 - 作者：[l52312516-cell](https://github.com/l52312516-cell)
 - 仓库：[l52312516-cell/astrbot_plugin_yunzai_bridge](https://github.com/l52312516-cell/astrbot_plugin_yunzai_bridge)
 - 配套 Yunzai 插件：[l52312516-cell/yunzai_plugin_astrbot_bridge](https://github.com/l52312516-cell/yunzai_plugin_astrbot_bridge)
-- 当前版本：`1.3.8`
+- 当前版本：`1.3.9`
 
 ## 功能
 
@@ -16,6 +16,7 @@ AstrBot 侧联动插件。它向 AI Agent 注册四个工具，通过带 Bearer 
 - 捕获 Yunzai 返回的文字、图片、音乐卡片、QQ JSON 卡片、分享、语音、视频和文件消息段。
 - AstrBot 转发模式会映射为原生 `Image`、`Music`、`Json`、`Share`、`Record`、`Video` 和 `File` 组件并发送到当前会话。
 - 默认沿用初版机制，让 Yunzai Bot 通过 `nativeReply` 立即发送回复。
+- 自动发现音乐、搜索、游戏、媒体、娱乐和实用插件；本地点歌失败后提示 LLM 继续尝试 `yunzai_music`。
 - 不向 Agent 暴露 `user_id`、`group_id` 或 `bot_id` 覆盖参数。
 
 ## 前置条件
@@ -63,6 +64,10 @@ git clone https://github.com/l52312516-cell/astrbot_plugin_yunzai_bridge.git
 | `token` | 空 | 与 Yunzai 端完全一致的共享 Token |
 | `request_timeout` | `30` | HTTP 请求超时秒数，范围 `1-120` |
 | `reply_delivery_mode` | `yunzai_native` | 互斥发送模式；原生模式要求 Yunzai 配置默认 Bot ID 并重启 |
+| `dynamic_tools_enabled` | `true` | 根据 Yunzai 能力接口动态注册分类工具 |
+| `capability_refresh_seconds` | `60` | 能力刷新间隔，范围 `30-3600` 秒 |
+| `llm_bridge_hint_enabled` | `true` | 提醒 LLM 在本地能力失败后尝试 Yunzai 工具 |
+| `fallback_on_unconfirmed` | `true` | 原生发送无送达凭证时，通过当前 AstrBot 会话回退发送媒体 |
 
 选择 `yunzai_native` 前，必须在 Yunzai 桥接配置中把 `default_bot_id` 填为 Yunzai 实际登录的机器人 QQ 号，然后完整重启 Yunzai。这里填写的不是 AstrBot Bot ID。选择 `astrbot_forward` 或 `capture_only` 时，不要求填写 Yunzai `default_bot_id`。
 
@@ -97,6 +102,7 @@ Docker:     http://yunzai:1145
 - 当前配置的 `game_queries`。
 - Yunzai 已加载插件及其规则正则。
 - 规则原始 `permission` 和普通用户候选分类。
+- 按安全类别聚合的 `agent_capabilities` 动态工具目录。
 - 回复发送策略和插件发现状态。
 
 自动发现只是候选目录，不代表普通用户可以执行所有发现命令。最终权限由 Yunzai 在收到完整命令后判定。
@@ -144,6 +150,22 @@ yunzai_game_query(game="wuthering", action="help")
 
 游戏和动作不是写死在 AstrBot 插件中的。调用前先通过 `yunzai_capabilities` 读取 Yunzai 当前配置。
 
+### 动态分类工具
+
+插件启动后立即同步 Yunzai 能力，之后默认每 60 秒刷新。临时失联会保留最后一次成功工具集；停用或重载插件时会移除动态工具并取消刷新任务。
+
+| 工具 | 注册条件与用法 |
+| --- | --- |
+| `yunzai_music(keyword, command="")` | 发现音乐规则时注册；优先使用 Yunzai 验证过的点歌模板，也可传完整命令 |
+| `yunzai_search(command)` | 发现搜索、百科、天气或翻译规则时注册 |
+| `yunzai_game(command)` | 发现游戏查询规则时注册，不限于角色面板 |
+| `yunzai_media(command)` | 发现图片或媒体查询规则时注册 |
+| `yunzai_entertainment(command)` | 发现安全娱乐规则时注册 |
+| `yunzai_utility(command)` | 发现帮助、状态、计算或实用规则时注册 |
+| `yunzai_plugins(command)` | 已发现插件的通用兜底入口 |
+
+除音乐工具外，动态工具接收完整 Yunzai 命令。动态注册只是帮助 LLM 选择入口，不会绕过 Yunzai 端权限判定。工具描述和系统提示均不写入插件提供的描述或正则文本，避免插件元数据影响 LLM 指令。
+
 ## 身份与权限
 
 RPC 目标由插件内部从当前消息事件生成：
@@ -170,7 +192,7 @@ Yunzai 端忽略 RPC 中的 Bot ID，并使用自己的 `default_bot_id`；空�
 | 角色 | 行为 |
 | --- | --- |
 | 主人 | 允许全部 Yunzai 命令 |
-| 普通用户 | 仅自己的 UID、面板更新和基础游戏查询 |
+| 普通用户 | 自己的 UID、面板、基础游戏查询，以及点歌、音乐搜索和安全娱乐查询 |
 | 身份缺失 | 按普通用户处理并拒绝执行 |
 
 普通用户遇到高风险、插件特权、未知或无法分类命令时，会收到 HTTP `403` 和 `PERMISSION_DENIED`。
@@ -209,7 +231,7 @@ Yunzai 插件直接返回图片 `Buffer` 时，图片消息会是紧凑引用：
 }
 ```
 
-媒体 URL 访问时仍需携带与 RPC 相同的 Bearer Token。它用于避免原始图片、语音、视频或文件数据污染 Tool Result 和 AstrBot 日志，不会把共享 Token 放进 URL。选择 AstrBot 转发模式或 Yunzai 原生发送明确失败时，AstrBot 会转换对应消息组件并调用 `event.send()`；成功后消息包含 `delivered_to_astrbot: true`。
+媒体 URL 访问时仍需携带与 RPC 相同的 Bearer Token。它用于避免原始图片、语音、视频或文件数据污染 Tool Result 和 AstrBot 日志，不会把共享 Token 放进 URL。选择 AstrBot 转发模式，或 Yunzai 原生发送为 `failed` / 默认配置下的 `unconfirmed` 时，AstrBot 会转换对应消息组件并调用当前事件的 `event.send()`；成功后消息包含 `delivered_to_astrbot: true`。
 
 图片兼容状态保留在 `image_delivery`；图片、音乐卡片、JSON 卡片、分享、语音、视频和文件的统一结果看 `media_delivery.status`。只有 `sent` 才能声称媒体已发出。Agent 不应根据媒体 URL、大小或 `success:true` 推测“正在投递”，也不能编造 `401`、Bearer 授权或“需要管理员放行”；真实失败原因只读取 `delivery_error` 和 `native_delivery_error`。
 
@@ -235,14 +257,14 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 | 模式 | 行为 |
 | --- | --- |
 | `yunzai_native` | 最快；要求 Yunzai 填写实际机器人 QQ 作为 `default_bot_id` 并完整重启 |
-| `astrbot_forward` | 无需 Yunzai `default_bot_id`；AstrBot 下载临时图片并发送到当前会话 |
-| `capture_only` | 只把回复交给 Agent，不实际发送图片 |
+| `astrbot_forward` | 无需 Yunzai `default_bot_id`；AstrBot 下载临时媒体并发送到当前会话 |
+| `capture_only` | 只把回复交给 Agent，不实际发送媒体 |
 
-原生模式不再需要 Yunzai 端的第二个发送开关，但必须指定实际发送账号。AstrBot 会在 RPC 中传入发送策略，Yunzai 使用 `default_bot_id` 对应账号调用当前事件的原生回复函数。原生发送明确返回失败时，失败图片自动回退到 AstrBot；已成功发送的图片不会重复转发。
+原生模式不再需要 Yunzai 端的第二个发送开关。Yunzai 会先按当前群或好友归属自动选择可达 Bot，找不到明确归属时再回退 `default_bot_id`。原生发送明确失败时会回退；无返回值或无法证明送达时记为 `unconfirmed`，默认同样由当前 AstrBot 会话回退。关闭 `fallback_on_unconfirmed` 可恢复为仅显式失败才回退。
 
 旧版 `allow_send_reply` 与 `deliver_captured_images` 布尔配置会被忽略，避免历史值冲突后静默进入仅捕获模式。升级后只读取 `reply_delivery_mode`；该字段缺失时默认 `yunzai_native`。
 
-`1.3.8` 兼容 AstrBot 热更新后残留的旧 Tool Schema。即使旧 Schema 仍传入 `send_reply`、`user_id`、`group_id` 或 `bot_id`，工具也只会记录并忽略这些参数；发送模式仍只服从 `reply_delivery_mode`，身份仍只取当前真实会话。
+`1.3.9` 兼容 AstrBot 热更新后残留的旧 Tool Schema。即使旧 Schema 仍传入 `send_reply`、`user_id`、`group_id` 或 `bot_id`，工具也只会记录并忽略这些参数；发送模式仍只服从 `reply_delivery_mode`，身份仍只取当前真实会话。
 
 注意：禁止发送回复不等于禁止命令副作用。主人执行配置修改、更新或重启命令时，即使 `send_reply=false`，命令本身仍可能生效。
 
@@ -258,9 +280,9 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 
 ### `got an unexpected keyword argument 'send_reply'`
 
-这是 AstrBot 热更新后仍使用旧 Tool Schema 导致的。升级 AstrBot 端插件到 `1.3.8`，然后在插件管理中停用并重新启用插件；如果日志仍出现旧签名，完整重启 AstrBot 以清理工具缓存。
+这是 AstrBot 热更新后仍使用旧 Tool Schema 导致的。升级 AstrBot 端插件到 `1.3.9`，然后在插件管理中停用并重新启用插件；如果日志仍出现旧签名，完整重启 AstrBot 以清理工具缓存。
 
-`1.3.8` 会兼容接收并忽略旧 `send_reply` 参数，因此旧缓存不会再让工具执行抛出 `TypeError`。不要把 `send_reply` 加回 Agent 参数；真实发送方式由插件配置中的单一 `reply_delivery_mode` 决定。
+`1.3.9` 会兼容接收并忽略旧 `send_reply` 参数，因此旧缓存不会再让工具执行抛出 `TypeError`。不要把 `send_reply` 加回 Agent 参数；真实发送方式由插件配置中的单一 `reply_delivery_mode` 决定。
 
 ### `未配置 Yunzai 地址`
 
@@ -290,13 +312,20 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 - 当前 AstrBot 版本需支持 LLM Tool；插件为旧版装饰器保留了兼容导入逻辑。
 - 重新加载插件并新建一次 Agent 会话。
 
+### LLM 说没有点歌插件，但 Yunzai 已安装点歌
+
+- 确认两端都是 `1.3.9`，Yunzai 开启 `discover_plugins`。
+- AstrBot 开启 `dynamic_tools_enabled` 和 `llm_bridge_hint_enabled`。
+- 调用 `yunzai_capabilities`，确认 `agent_capabilities` 中出现 `yunzai_music` 和经过规则验证的模板。
+- 能力同步最长受 `capability_refresh_seconds` 影响；也可以重载 AstrBot 插件立即重新同步。
+
 ### Tool Result 出现 `�PNG`、`IHDR` 或大量乱码
 
-旧版 Yunzai 桥接把图片 `Buffer` 转成了字符串。将 AstrBot 和 Yunzai 两端都升级到 `1.3.8`；默认由 Yunzai 原生发送，AstrBot 转发模式才使用临时媒体。
+旧版 Yunzai 桥接把图片 `Buffer` 转成了字符串。将 AstrBot 和 Yunzai 两端都升级到 `1.3.9`；默认由 Yunzai 原生发送，AstrBot 转发模式才使用临时媒体。
 
 ### 图片 URL 正常但会话没有收到图片
 
-- 确认两端都是 `1.3.8`。
+- 确认两端都是 `1.3.9`。
 - 追求初版速度时，AstrBot 选择 `Yunzai 原生发送`；Yunzai 端不再有第二个发送开关。
 - 查看图片消息的 `native_delivery`、`native_delivery_error` 和 `delivered_to_astrbot`。
 - 查看 Tool Result 中的 `delivered_to_astrbot` 和 `delivery_error`。
@@ -304,7 +333,7 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 
 ### 机器人说已发送，但实际没有收到
 
-旧版把命令执行成功误当成消息发送成功。`1.3.8` 中应检查：
+旧版把命令执行成功误当成消息发送成功。`1.3.9` 中应检查：
 
 ```json
 {
@@ -318,7 +347,7 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 }
 ```
 
-只有 `reply_delivery.status: "sent"` 才能确认 Yunzai 原生发送成功。图片经过原生或后备路径后还会生成最终结论 `image_delivery.status`；只有它等于 `sent` 时 Agent 才能声称图片已经发出。`failed` 或 `partial` 会给出错误，`no_reply` 表示插件没有调用回复函数。
+只有 `reply_delivery.status: "sent"` 才能确认 Yunzai 原生发送成功。`unconfirmed` 表示适配器没有返回消息 ID 或明确成功状态，不等于已送达。媒体经过原生或后备路径后会生成最终结论 `media_delivery.status`；只有它等于 `sent` 时 Agent 才能声称媒体已经发出。
 
 ### 图片发到了错误会话
 
@@ -335,11 +364,11 @@ AstrBot 配置只显示一个互斥下拉框，Agent 工具不再提供 `send_re
 }
 ```
 
-群聊中的 `message_type` 或 `group_id` 不正确，说明会话适配字段异常；`1.3.8` 优先使用 `unified_msg_origin`。如果 `effective_target` 正确但仍投递到别处，需要检查 Yunzai `default_bot_id` 对应的适配器和 Bot 账号。
+群聊中的 `message_type` 或 `group_id` 不正确，说明会话适配字段异常；`1.3.9` 优先使用 `unified_msg_origin`。同时查看 `bot_resolution` 的选中 Bot、来源和可达状态；若仍投递错误，再检查 Yunzai `default_bot_id` 与适配器群/好友列表。
 
 ### 点歌成功但音乐卡片没有发送，AI声称遇到401
 
-旧版只实际转发图片，`music`、`json`、`record` 等消息段只作为数据返回给 Agent，Agent 可能据此虚构“401、Bearer Token 或待投递”。升级双端到 `1.3.8`。新版会实际发送音乐/JSON卡片和媒体，并通过 `media_delivery` 返回确认状态；不存在要求管理员额外配置媒体 Bearer 授权的步骤。
+旧版只实际转发图片，`music`、`json`、`record` 等消息段只作为数据返回给 Agent，Agent 可能据此虚构“401、Bearer Token 或待投递”。升级双端到 `1.3.9`。新版会实际发送音乐/JSON卡片和媒体，并通过 `media_delivery` 返回确认状态；不存在要求管理员额外配置媒体 Bearer 授权的步骤。
 
 ## 开发测试
 

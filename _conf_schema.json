@@ -18,6 +18,31 @@
     "min": 1,
     "max": 120
   },
+  "dynamic_tools_enabled": {
+    "description": "自动注册 Yunzai 动态工具",
+    "type": "bool",
+    "default": true,
+    "hint": "根据 Yunzai 已加载插件注册音乐、搜索、游戏、媒体、娱乐和实用工具，最多七个。"
+  },
+  "capability_refresh_seconds": {
+    "description": "能力刷新间隔（秒）",
+    "type": "int",
+    "default": 60,
+    "min": 30,
+    "max": 3600
+  },
+  "llm_bridge_hint_enabled": {
+    "description": "提醒 LLM 使用 Yunzai 能力",
+    "type": "bool",
+    "default": true,
+    "hint": "本地点歌工具不可用或失败时，提醒 LLM 继续调用 yunzai_music。"
+  },
+  "fallback_on_unconfirmed": {
+    "description": "原生发送未确认时由 AstrBot 回退发送",
+    "type": "bool",
+    "default": true,
+    "hint": "送达优先。Yunzai 未返回 message_id 等成功凭证时转发到当前 AstrBot 会话；少数适配器可能产生重复消息。"
+  },
   "reply_delivery_mode": {
     "description": "回复发送模式",
     "type": "string",
